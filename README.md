@@ -1,40 +1,12 @@
 # Praca dyplomowa Python Deweloper WSB Gdańsk
 
-## Komendy wykorzystane do utworzenia wirtualnego środowiska w Terminalu w Pycharm
-
-Konfiguracja środowiska - Ubuntu:
-
-sudo apt-get 
-
-update sudo apt-get 
-
-install libpython3-dev 
-
-sudo apt-get 
-
-install python3-venv 
-
-python3 -m venv venv
-
-Aktywacja venv ubuntu 
-
-source venv/bin/activate
-
-Pandas Instalacja 
-
-pip install pandas
-
-Jupyter Notebook Instalacja 
-
-pip install jupyter notebook
-
-Uruchamianie w terminalu
-
-jupyter notebook
-
 ## TEMAT PRACY: 
 
-## Analiza danych dotyczących wypadków samochodowych w NY
+## Analiza danych dotyczących wypadków samochodowych w NY:
+### Określić najniebezpieczniejsze czynniki wypadków w danej dzielnicy NY
+### Dowiedzieć się, ile zgonów oraz obrażeń zostało spowodowanych przez szybką jazdę ogólnie, oraz w danej dzielnicy
+### Określić top 5 najniebezpieczniejszych czynników wypadków
+### Wygenerować wizualizację określającą ilość wypadków z podziałem na dni tygodnia
 
 #### Pobranie niezbędnych bibliotek przed pobraniem i przygotowaniem danych do analizy
 
@@ -47,6 +19,10 @@ import matplotlib.pyplot as plt
 import datetime as dt
 
 from datetime import datetime
+
+import geopandas as gpd
+
+from shapely.geometry import Point
 
 ### 1. Wczytanie danych
 
@@ -147,5 +123,21 @@ plt.xlabel('Day of week')
 plt.ylabel('Number of accidents')
 plt.show()
 
+## ZADANIE DODATKOWE 
+### Wygeneruj mapę z miejscami wypadków w danej dzielnicy.
 
+motor_queens= motor_data[motor_data['BOROUGH'].str.contains('QUEENS', na=False)]
+
+groupped = motor_queens.value_counts('LATITUDE').nlargest(9)
+groupped1 = motor_queens.value_counts('LONGITUDE').nlargest(9)
+
+data_dict = {'x': {0: -73.870350, 1: -73.870369, 2: -73.822250, 3: -73.767360, 4: -73.937386, 5: -73.773828, 6: -73.757110, 7: -73.834656, 8: -73.887560},
+ 'y': {0: 40.733536, 1: 40.733497, 2: 40.665257, 3: 40.656160, 4:40.748924, 5: 40.666120, 6: 40.659651, 7: 40.684240, 8: 40.76229040}}
+
+df = pd.DataFrame(data_dict)
+geometry = [Point(xy) for xy in zip(df['x'], df['y'])]
+gdf = gpd.GeoDataFrame(df, geometry=geometry, crs=4326)
+print(gdf.head())
+print(gdf.dtypes)
+gdf.explore()
 
