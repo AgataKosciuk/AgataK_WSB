@@ -12,17 +12,18 @@
 
 import pandas as pd
 
-import numpy as np
+import numpy as py
 
 import matplotlib.pyplot as plt
 
 import datetime as dt
-
 from datetime import datetime
 
 import geopandas as gpd
 
 from shapely.geometry import Point
+
+import folium
 
 ### 1. Wczytanie danych
 
@@ -30,24 +31,14 @@ df = pd.read_csv
 
 ### 2. Czyszczenie/przygotowanie danych:
 
-### - usuwamy kolumny zawierające puste dane
-
-df.dropna(axis=1,how='all', subset=29, inplace=True)
-
-### - usuwamy wiersze zawierające puste dane
-
-df.dropna(axis=0,how='any', inplace=True)
-
-### - usuwamy duplikaty danych
-
-df.drop_duplicates(subset=None, keep=False, inplace=True, ignore_index=True)
-
 ### - usuwamy kolumny, które nie są nam potrzebne do analizy danych do zadania
 
-df= df.drop(df.columns[[1, 3, 4, 5, 6, 7, 8, 18, 19]], axis=1)
+motor_data = motor_data.drop(motor_data.columns[[1, 3, 6, 7, 8, 9, 24, 25, 26, 27, 28]], axis=1)
 
 ## ZADANIA
 ## 1. Określić najniebezpieczniejsze czynniki wypadków w danej dzielnicy NY - Wybrana dzielnica QUEENS
+
+df = df[['BOROUGH', 'CONTRIBUTING FACTOR VEHICLE 1', 'CONTRIBUTING FACTOR VEHICLE 2', 'CONTRIBUTING FACTOR VEHICLE 3', 'CONTRIBUTING FACTOR VEHICLE 4', 'CONTRIBUTING FACTOR VEHICLE 5']]
 
 #### - filtrowanie danych tylko dla wybranej dzielnicy
 
@@ -57,87 +48,159 @@ df = df[df['BOROUGH'].str.contains('QUEENS', na=False)]
 
 #### Wyświetlamy najniebezpieczniejsze przyczyny wypadków w wybranej dzielnicy w kolejności od najczęściej występującej
 
-#### - grupujemy i wyświetlamy przyczyny wypadków
+motor_queens = motor_queens.copy()
 
-df = df.groupby('BOROUGH')['CONTRIBUTING FACTOR VEHICLE 1'].value_counts().nlargest(5)
+factors_columns = ['CONTRIBUTING FACTOR VEHICLE 1', 'CONTRIBUTING FACTOR VEHICLE 2', 'CONTRIBUTING FACTOR VEHICLE 3', 'CONTRIBUTING FACTOR VEHICLE 4', 'CONTRIBUTING FACTOR VEHICLE 5']
 
-## 2.A Dowiedzieć się, ile zgonów oraz obrażeń zostało spowodowanych przez szybką jazdę ogólnie
+motor_queens['FACTORS'] = motor_queens[factors_columns].stack().reset_index(drop=True)
 
-#### filtrujemy dane, szukając tego co nas interesuje
+motor_queens['FACTORS'] = motor_queens['FACTORS'][(motor_queens['FACTORS'] != 1) & (motor_queens['FACTORS'] != 80)]
 
-df = df[df['CONTRIBUTING FACTOR VEHICLE 1'].str.contains('Speed', na=False)].sum()                       
+motor_counts = motor_queens.groupby(['BOROUGH', 'FACTORS']).size().reset_index(name='COUNT')
 
-#### ODPOWIEDŹ: Przez szybką jazdę zostało spowodowanych 3471 zgonów i obrażeń
+motor_counts = motor_counts.sort_values(by='COUNT', ascending=False)
 
-#### - sumujemy dane z konkretnych kolumn
+# ODPOWIEDŹ: Wyświetlamy najniebezpieczniejsze przyczyny wypadków w wybranej dzielnicy w kolejności od najczęściej występującej
 
-df['Total'] = df['NUMBER OF PERSONS INJURED'] + df['NUMBER OF PEDESTRIANS INJURED'] + df['NUMBER OF CYCLIST INJURED'] + df['NUMBER OF MOTORIST INJURED'] + df['NUMBER OF PERSONS KILLED'] + df['NUMBER OF PEDESTRIANS KILLED'] + df['NUMBER OF CYCLIST KILLED'] + df['NUMBER OF MOTORIST KILLED']
+BOROUGH	FACTORS	COUNT
+54	QUEENS	Unspecified	64914
+11	QUEENS	Driver Inattention/Distraction	13314
+18	QUEENS	Failure to Yield Right-of-Way	4998
+6	QUEENS	Backing Unsafely	2864
+21	QUEENS	Following Too Closely	1902
+36	QUEENS	Passing or Lane Usage Improper	1388 ...
 
-## 2.B Dowiedzieć się, ile zgonów oraz obrażeń zostało spowodowanych przez szybką jazdę w wybranej dzielnicy Queens
+# 2.A Dowiedzieć się, ile zgonów oraz obrażeń zostało spowodowanych przez szybką jazdę ogólnie
 
-#### - filtrujemy dane przez interesujące nas wartości
+# filtrujemy dane dla wypadków spowodowanych przez szybką jazdę
+speed_data = motor_data.copy()
+speed_data['FACTORS'] = speed_data[['CONTRIBUTING FACTOR VEHICLE 1', 'CONTRIBUTING FACTOR VEHICLE 2', 'CONTRIBUTING FACTOR VEHICLE 3', 'CONTRIBUTING FACTOR VEHICLE 4', 'CONTRIBUTING FACTOR VEHICLE 5']].values.tolist()
+speed_data = speed_data.explode(column='FACTORS')
 
-df = df[df['BOROUGH'].str.contains('QUEENS', na=False)].sum()
+# grupujemy po czynnikach przyczynowych i obliczamy sumę zgonów i obrażeń
+speed_data = speed_data.groupby('BOROUGH').agg({
+    'NUMBER OF PERSONS KILLED': 'sum',
+    'NUMBER OF PERSONS INJURED': 'sum',
+    'NUMBER OF PEDESTRIANS INJURED':'sum',
+    'NUMBER OF PEDESTRIANS KILLED':'sum',
+    'NUMBER OF CYCLIST INJURED':'sum',
+    'NUMBER OF CYCLIST KILLED':'sum',
+    'NUMBER OF MOTORIST INJURED':'sum',
+    'NUMBER OF MOTORIST KILLED':'sum'
+}).reset_index()
 
-#### ODPOWIEDŹ: Przez szybką jazdę w dzielnicy Queens zostało spowodowanych 1035 zgonów i obrażeń
+# użyłam funkcji pomocniczej do sprawdzenia, czy wartość jest niepustym ciągiem znaków
+def is_nonempty_string(value):
+    return isinstance(value, str) and value.strip() != ''
 
-#### - sumujemy konkretne kolumny w celu otrzymania wyniku
+speed_factors = ['SPEED', 'Speeding', 'Excessive Speed']
 
-df['Total'] = df['NUMBER OF PERSONS INJURED'] + df['NUMBER OF PEDESTRIANS INJURED'] + df['NUMBER OF CYCLIST INJURED'] + df['NUMBER OF MOTORIST INJURED'] + df['NUMBER OF PERSONS KILLED'] + df['NUMBER OF PEDESTRIANS KILLED'] + df['NUMBER OF CYCLIST KILLED'] + df['NUMBER OF MOTORIST KILLED']
+# Filtrujemy dane dla wypadków związanych z przekroczeniem prędkości
+speed_data = motor_data[motor_data['CONTRIBUTING FACTOR VEHICLE 1'].apply(lambda x: any(factor in x.upper() for factor in speed_factors) if is_nonempty_string(x) else False)]
 
-## 3. Określić top 5 najniebezpieczniejszych czynników wypadków
+# Sumujemy liczby zgonów i obrażeń
+total_killed = speed_data['NUMBER OF PEDESTRIANS KILLED'].sum() + speed_data['NUMBER OF CYCLIST KILLED'].sum() + speed_data['NUMBER OF MOTORIST KILLED'].sum()
+total_injuries = speed_data['NUMBER OF PEDESTRIANS INJURED'].sum() + speed_data['NUMBER OF CYCLIST INJURED'].sum() + speed_data['NUMBER OF MOTORIST INJURED'].sum()
 
-#### ODPOWIEDŹ: TOP 5 najniebezpieczniejszych czynników danych wg ilości ich występowania
+#ODPOWIEDŹ
+display("Liczba zgonów spowodowanych przez przekroczenie prędkości ogólnie:", total_killed)
+display("Liczba obrażeń spowodowanych przez przekroczenie prędkości ogólnie:", total_injuries)
 
-#### - wyszukujemy i zliczamy interesujące nas dane
+'Liczba zgonów spowodowanych przez przekroczenie prędkości ogólnie:'
+150
+'Liczba obrażeń spowodowanych przez przekroczenie prędkości ogólnie:'
+8349
+2.B Dowiedzieć się, ile zgonów oraz obrażeń zostało spowodowanych przez szybką jazdę w wybranej dzielnicy Queens
+In [31]:
 
-df = df.value_counts('CONTRIBUTING FACTOR VEHICLE 1').nlargest(5)
+# Filtrujemy dane dla wypadków związanych z przekroczeniem prędkości i dla dzielnicy Queens
+speed_data_queens = motor_data[(motor_data['BOROUGH'] == 'QUEENS') & (motor_data['CONTRIBUTING FACTOR VEHICLE 1'].apply(lambda x: any(factor in x.upper() for factor in speed_factors) if is_nonempty_string(x) else False))]
 
-## 4. Wygenerować wizualizację określającą ilość wypadków z podziałem na dni tygodnia
+total_killed_queens = speed_data_queens['NUMBER OF PEDESTRIANS KILLED'].sum() + speed_data_queens['NUMBER OF CYCLIST KILLED'].sum() + speed_data_queens['NUMBER OF MOTORIST KILLED'].sum()
+total_injuries_queens = speed_data_queens['NUMBER OF PEDESTRIANS INJURED'].sum() + speed_data_queens['NUMBER OF CYCLIST INJURED'].sum() + speed_data_queens['NUMBER OF MOTORIST INJURED'].sum()
 
-#### - wybieramy interesującą nas kolumnę z danymi
+# ODPOWIEDŹ
+display("Liczba zgonów spowodowanych przez przekroczenie prędkości w dzielnicy Queens:", total_killed_queens)
+display("Liczba obrażeń spowodowanych przez przekroczenie prędkości w dzielnicy Queens:", total_injuries_queens)
 
-df['ACCIDENT DATE']
+'Liczba zgonów spowodowanych przez przekroczenie prędkości w dzielnicy Queens:'
+27
+'Liczba obrażeń spowodowanych przez przekroczenie prędkości w dzielnicy Queens:'
+1143
 
-#### - konwertujemy argumenty na datatime
+# 3. Określić top 5 najniebezpieczniejszych czynników wypadków wg ilości ich występowania
 
-df['ACCIDENT DATE'] = pd.to_datetime(df['ACCIDENT DATE'])
+factor_counts = motor_data.groupby('CONTRIBUTING FACTOR VEHICLE 1').size()
 
-#### - zmieniamy format daty dd/mm/rr
+top_5_factors = factor_counts.nlargest(5)
 
-df['formatted_date'] = df['ACCIDENT DATE'].dt.strftime('%d/%m/%Y %H:%M:%S')
+# ODPOWIEDŹ
+print("TOP 5 najniebezpieczniejszych czynników danych:")
+print(top_5_factors)
 
-#### - przypisujemy do daty dni tygodnia
+TOP 5 najniebezpieczniejszych czynników danych:
+CONTRIBUTING FACTOR VEHICLE 1
+Unspecified                       595805
+Driver Inattention/Distraction    299425
+Failure to Yield Right-of-Way      91617
+Following Too Closely              78467
+Backing Unsafely                   61445
+dtype: int64
 
-df['DAY OF WEEK'] = df['ACCIDENT DATE'].dt.day_name()
+# 4. Wygenerować wizualizację określającą ilość wypadków z podziałem na dni tygodnia
 
-#### - zliczamy dni tygodnia
+# wybieramy interesującą nas kolumnę z danymi
 
-day_counts = df['DAY OF WEEK'].value_counts()
+motor_data['ACCIDENT DATE']
 
-#### - generujemy wizualizację
+# konwertujemy argumenty na datatime
+
+motor_data['ACCIDENT DATE'] = pd.to_datetime(motor_data['ACCIDENT DATE'])
+
+# zmieniamy format daty dd/mm/rr
+
+motor_data['formatted_date'] = motor_data['ACCIDENT DATE'].dt.strftime('%d/%m/%Y %H:%M:%S')
+
+# przypisujemy do daty dni tygodnia
+
+motor_data['DAY OF WEEK'] = motor_data['ACCIDENT DATE'].dt.day_name()
+
+# zliczamy dni tygodnia
+
+day_counts = motor_data['DAY OF WEEK'].value_counts()
+display(day_counts)
+DAY OF WEEK
+Friday       256236
+Thursday     242307
+Tuesday      240216
+Wednesday    237040
+Monday       231946
+Saturday     214607
+Sunday       189826
+Name: count, dtype: int64
+
+# generujemy wizualizację
 
 day_counts.plot(kind='bar')
 plt.title('Number of accidents by day of the week')
 plt.xlabel('Day of week')
 plt.ylabel('Number of accidents')
+
 plt.show()
 
-## ZADANIE DODATKOWE 
-### Wygeneruj mapę z miejscami wypadków w danej dzielnicy.
+# ZADANIE DODATKOWE: Wygeneruj mapę z miejscami wypadków w danej dzielnicy.
+# Filtrujemy dane dla dzielnicy Queens i usuwamy wiersze z brakującymi wartościami LATITUDE / LONGITUDE
+queens_data = motor_data[(motor_data['BOROUGH'] == 'QUEENS') & (~motor_data['LATITUDE'].isnull()) & (~motor_data['LONGITUDE'].isnull())]
 
-motor_queens= motor_data[motor_data['BOROUGH'].str.contains('QUEENS', na=False)]
+# Ograniczamy liczbę punktów na mapie w celu przyspieszenia procesu
+max_points = 50
+queens_data = queens_data.head(max_points)
 
-groupped = motor_queens.value_counts('LATITUDE').nlargest(9)
-groupped1 = motor_queens.value_counts('LONGITUDE').nlargest(9)
+# Tworzymy mapę - Współrzędne Queens
+queens_map = folium.Map(location=[40.7282, -73.7949], zoom_start=11)  
 
-data_dict = {'x': {0: -73.870350, 1: -73.870369, 2: -73.822250, 3: -73.767360, 4: -73.937386, 5: -73.773828, 6: -73.757110, 7: -73.834656, 8: -73.887560},
- 'y': {0: 40.733536, 1: 40.733497, 2: 40.665257, 3: 40.656160, 4:40.748924, 5: 40.666120, 6: 40.659651, 7: 40.684240, 8: 40.76229040}}
-
-df = pd.DataFrame(data_dict)
-geometry = [Point(xy) for xy in zip(df['x'], df['y'])]
-gdf = gpd.GeoDataFrame(df, geometry=geometry, crs=4326)
-print(gdf.head())
-print(gdf.dtypes)
-gdf.explore()
-
+# Dodajemy znaczniki dla wybranej ilości wypadków
+for index, row in queens_data.iterrows():
+    location = [row['LATITUDE'], row['LONGITUDE']]
+    folium.Marker(location).add_to(queens_map)
+queens_map
